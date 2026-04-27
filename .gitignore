@@ -1,0 +1,6 @@
+# Never commit secrets
+tailscale-deploy.conf
+*.authkey
+.env
+.env.*
+!.env.example
