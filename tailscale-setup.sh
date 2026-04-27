@@ -62,11 +62,6 @@ if [[ -z "${TAILSCALE_AUTHKEY}" || "${TAILSCALE_AUTHKEY}" != tskey-* ]]; then
     exit 1
 fi
 
-# Tailscale Standalone .pkg download URL (always latest stable)
-PKG_URL="https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg"
-
-PKG_PATH="/tmp/Tailscale.pkg"
-
 #=============================================================================
 # STEP 1: Download & Install Tailscale (Standalone variant)
 #=============================================================================
