@@ -110,42 +110,18 @@ for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
     fi
 done
 
-# Determine which non-root user to run brew as.
-# Prefer SUDO_USER (interactive SSH/sudo — that user explicitly invoked us
-# and is presumably an admin). Fall back to the GUI console user for Jamf/MDM
-# contexts where the script runs as root with no SUDO_USER. Last resort: the
-# owner of an existing brew prefix.
-if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    CONSOLE_USER="${SUDO_USER}"
-else
-    CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
-fi
-if [[ -n "$BREW" && ( -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" ) ]]; then
-    CONSOLE_USER="$(stat -f%Su "$(dirname "$BREW")")"
-fi
-if [[ -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" ]]; then
-    echo "ERROR: Could not determine a non-root user to run Homebrew as." >&2
-    echo "       Set SUDO_USER or run via 'sudo' from a real user account." >&2
+if [[ -z "$BREW" ]]; then
+    echo "ERROR: Homebrew not found." >&2
+    echo "       Install Homebrew first: https://brew.sh" >&2
+    echo "       Then re-run this script." >&2
     exit 1
 fi
 
-# Bootstrap Homebrew if missing
-if [[ -z "$BREW" ]]; then
-    echo "Homebrew not found — installing it (non-interactive)..."
-    sudo -u "$CONSOLE_USER" NONINTERACTIVE=1 /bin/bash -c \
-        "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-    for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-        if [[ -x "$candidate" ]]; then
-            BREW="$candidate"
-            break
-        fi
-    done
-
-    if [[ -z "$BREW" ]]; then
-        echo "ERROR: Homebrew install completed but brew binary still not found." >&2
-        exit 1
-    fi
+# Brew refuses to run as root, so run it as the brew prefix owner.
+CONSOLE_USER="$(stat -f%Su "$(dirname "$BREW")")"
+if [[ -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" ]]; then
+    echo "ERROR: Could not determine a non-root user to run Homebrew as." >&2
+    exit 1
 fi
 
 echo "Using Homebrew at $BREW (as user: $CONSOLE_USER)"
