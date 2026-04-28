@@ -1,49 +1,231 @@
 # tailscale-jamf
 
-Silent Tailscale deploy script for macOS, suitable for Jamf, local execution, or remote SSH.
+Silent Tailscale deploy script for macOS. Installs the **open-source `tailscaled`**
+(via Homebrew) as a LaunchDaemon so the device joins the tailnet at boot — before
+any user logs in — and enables **Tailscale SSH**.
 
-## Usage
+> Why not the `.pkg` / App Store Tailscale.app? That variant runs in Apple's
+> System Extension sandbox, which blocks the Tailscale SSH server. Only the
+> open-source `tailscaled` daemon can act as a Tailscale SSH server on macOS.
 
-The script needs a Tailscale auth key. It checks (in order):
+---
+
+## Quickstart — set up a brand-new Mac remotely over SSH
+
+Use this when you've just received a new Mac (no Tailscale yet) and you
+need to enroll it in the tailnet by SSH'ing in over the local network.
+
+**Prereqs on the target Mac:**
+
+- Remote Login enabled (`System Settings → General → Sharing → Remote Login`)
+- An admin account named `CCBCAdmin` (substitute your own admin if different)
+- The Mac is reachable on the LAN (you have its IP or `.local` name)
+- **Homebrew installed** — see [Installing Homebrew](#installing-homebrew-prerequisite) below
+
+**On your machine** (one-shot, no files copied to the target):
+
+```sh
+# 1. Get a fresh auth key from https://login.tailscale.com/admin/settings/keys
+#    See "Generating the auth key" below — must be reusable, ephemeral=optional,
+#    pre-approved, and tagged with tag:communications.
+AUTHKEY=tskey-auth-xxxxxxxxxxxx
+
+# 2. Pull the latest script from GitHub and pipe it through SSH straight into
+#    sudo bash on the target. Nothing gets written to disk on your machine
+#    or theirs (besides what the script itself installs).
+curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh \
+  | ssh -t CCBCAdmin@<mac-ip-or-name> "sudo TAILSCALE_AUTHKEY=$AUTHKEY bash -s"
+```
+
+You'll be prompted for `CCBCAdmin`'s password (for SSH) and again for `sudo`.
+The script will:
+
+1. Refuse to run if the GUI Tailscale.app or its system extension is installed
+   (it'll print exact removal commands).
+2. Refuse to run if Homebrew isn't installed (install it first — see below).
+3. `brew install tailscale`.
+4. Register `tailscaled` as a root LaunchDaemon (`com.tailscale.tailscaled`).
+5. Run `tailscale up` with the auth key, `tag:communications`, `--ssh`, and the
+   Mac's `ComputerName` as the hostname.
+6. Print `tailscale status`.
+
+When it finishes, the device shows up in the Tailscale admin console already
+tagged, and you can immediately reach it via Tailscale SSH:
+
+```sh
+tailscale ssh CCBCAdmin@<computername>
+```
+
+---
+
+## Installing Homebrew (prerequisite)
+
+The script does **not** install Homebrew — it only refuses to run without it.
+Install Homebrew once on the target Mac before running `tailscale-setup.sh`.
+
+**Interactively, sitting at the Mac:**
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+**Remotely over SSH** (must run as a regular admin user, _not_ root — brew
+refuses to install as root):
+
+```sh
+ssh -t CCBCAdmin@<mac-ip-or-name> \
+  'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+```
+
+`NONINTERACTIVE=1` skips the "Press RETURN to continue" prompt, which would
+otherwise hang a non-TTY SSH session.
+
+After install, verify:
+
+```sh
+ssh CCBCAdmin@<mac-ip-or-name> 'ls /opt/homebrew/bin/brew /usr/local/bin/brew 2>/dev/null'
+```
+
+One of those paths must exist — `/opt/homebrew/bin/brew` on Apple Silicon,
+`/usr/local/bin/brew` on Intel. The setup script auto-detects either.
+
+---
+
+## Generating the auth key (expires every 90 days)
+
+The script needs a **pre-authorized, tagged auth key** so devices join silently
+and land in the right ACL group with no manual approval.
+
+1. Sign in to <https://login.tailscale.com/admin/settings/keys>.
+2. Click **Generate auth key…**
+3. Set:
+   - **Reusable:** ✅ on (so the same key works for every Mac you set up)
+   - **Ephemeral:** ❌ off (these are long-lived workstations)
+   - **Pre-approved:** ✅ on (skip device approval)
+   - **Tags:** `tag:communications` (must match `TAILSCALE_TAGS` in
+     [`tailscale-setup.sh`](tailscale-setup.sh))
+   - **Expiration:** 90 days (Tailscale's max for auth keys)
+4. Copy the `tskey-auth-…` value **immediately** — it's only shown once.
+5. Store it in your password manager labeled with the **expiration date**.
+
+### When the key expires (every 90 days)
+
+Auth keys can't be renewed — you generate a new one and rotate:
+
+1. Generate a new key per the steps above.
+2. Update wherever you store it for deploys:
+   - **1Password / shared vault** — replace the entry, re-share.
+   - **Jamf** — edit the policy and replace script parameter `$4` with the new key.
+   - **Server-side `/etc/tailscale-deploy.conf`** — `sudo vi` and replace the value.
+3. Revoke the old key on the same admin page so a leaked copy can't be used.
+
+> **Tag prerequisites:** before the key works, an ACL **tag owner** must exist
+> for `tag:communications` in your tailnet policy file
+> (`"tagOwners": { "tag:communications": ["group:admins"] }`). Without that, the
+> auth key generation will fail.
+
+---
+
+## How the script picks up the auth key
+
+Resolution order (first match wins):
 
 1. `--authkey=tskey-...` CLI flag
 2. `TAILSCALE_AUTHKEY` environment variable
 3. Jamf script parameter `$4`
-4. Config file at `/etc/tailscale-deploy.conf` or `~/.config/tailscale-deploy.conf`
+4. Config file: `/etc/tailscale-deploy.conf` or `~/.config/tailscale-deploy.conf`
 
-### Local
+---
+
+## Other usage modes
+
+### Local (you're sitting at the Mac)
 
 ```sh
 sudo ./tailscale-setup.sh --authkey=tskey-auth-xxxxx
 ```
 
-Or stash the key once:
+Or stash the key once and forget the flag:
 
 ```sh
 sudo install -m 600 tailscale-deploy.conf.example /etc/tailscale-deploy.conf
-sudo vi /etc/tailscale-deploy.conf   # set the real key
+sudo vi /etc/tailscale-deploy.conf   # paste the real key
 sudo ./tailscale-setup.sh
 ```
 
-### Remote over SSH
-
-Pass the key via env var without writing it to the remote disk:
+### Remote SSH, script already on the target
 
 ```sh
-ssh user@host "sudo TAILSCALE_AUTHKEY=tskey-auth-xxxxx bash -s" < tailscale-setup.sh
+ssh CCBCAdmin@host "sudo /path/to/tailscale-setup.sh --authkey=tskey-auth-xxxxx"
 ```
 
-Or, if the script is already on the remote host:
+### Remote SSH, stream from your laptop (no file copy)
 
 ```sh
-ssh user@host "sudo /path/to/tailscale-setup.sh --authkey=tskey-auth-xxxxx"
+ssh CCBCAdmin@host "sudo TAILSCALE_AUTHKEY=tskey-auth-xxxxx bash -s" < tailscale-setup.sh
+```
+
+### Remote SSH, always-latest from GitHub
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh \
+  | ssh -t CCBCAdmin@host "sudo TAILSCALE_AUTHKEY=tskey-auth-xxxxx bash -s"
 ```
 
 ### Jamf
 
-Add the script to Jamf and pass the auth key as parameter 4.
+Add `tailscale-setup.sh` as a script in Jamf and pass the auth key as
+**parameter 4**. Homebrew must already be installed on the target device \u2014
+deploy it via a separate Jamf policy first (e.g. an "Install Homebrew" script
+that runs as the GUI console user before this one).
+
+---
+
+## Updating Tailscale later
+
+The script installs via Homebrew, so updates are a one-liner. The final line of
+a successful run prints the exact command for that machine, e.g.:
+
+```sh
+sudo -u CCBCAdmin /opt/homebrew/bin/brew upgrade tailscale
+```
+
+---
+
+## Troubleshooting
+
+**`ERROR: /Applications/Tailscale.app is installed`**
+Remove the GUI variant first — it shadows the open-source daemon's CLI socket:
+
+```sh
+sudo rm -rf /Applications/Tailscale.app
+sudo killall Tailscale 2>/dev/null || true
+sudo shutdown -r now
+```
+
+**`ERROR: Tailscale's GUI system extension is still loaded`**
+The `.app` is gone but Apple still has the NetworkExtension cached:
+
+```sh
+sudo systemextensionsctl developer on
+sudo systemextensionsctl uninstall W5364U7YZB io.tailscale.ipn.macsys.network-extension
+sudo systemextensionsctl developer off
+sudo shutdown -r now
+```
+
+**`ERROR: No valid Tailscale auth key provided`**
+Your key is missing, expired, or doesn't start with `tskey-`. Generate a new
+one (see above).
+
+**`tailscale up` fails with `requested tags … are not permitted`**
+The auth key wasn't generated with `tag:communications`, or your tailnet policy
+file has no `tagOwners` entry for it.
+
+---
 
 ## Security
 
-- `*.conf`, `*.authkey`, and `.env*` files are gitignored.
-- Never commit a real `tskey-...` value.
+- `*.conf`, `*.authkey`, and `.env*` are gitignored — see [`.gitignore`](.gitignore).
+- Never commit a real `tskey-...` value. If one leaks, **revoke it immediately**
+  at <https://login.tailscale.com/admin/settings/keys>.
+- `/etc/tailscale-deploy.conf` should be `root:wheel 0600`.
