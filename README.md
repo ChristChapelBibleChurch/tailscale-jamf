@@ -22,23 +22,29 @@ need to enroll it in the tailnet by SSH'ing in over the local network.
 - The Mac is reachable on the LAN (you have its IP or `.local` name)
 - **Homebrew installed** — see [Installing Homebrew](#installing-homebrew-prerequisite) below
 
-**On your machine** (one-shot, no files copied to the target):
+**On your machine** \u2014 SSH in first, then run the install on the remote shell
+so `sudo` can prompt for the password normally:
 
 ```sh
 # 1. Get a fresh auth key from https://login.tailscale.com/admin/settings/keys
-#    See "Generating the auth key" below — must be reusable, ephemeral=optional,
+#    See "Generating the auth key" below \u2014 must be reusable, ephemeral=optional,
 #    pre-approved, and tagged with tag:communications.
-AUTHKEY=tskey-auth-xxxxxxxxxxxx
 
-# 2. Pull the latest script from GitHub and pipe it through SSH straight into
-#    sudo bash on the target. Nothing gets written to disk on your machine
-#    or theirs (besides what the script itself installs).
+# 2. SSH into the target Mac
+ssh CCBCAdmin@<mac-ip-or-name>
+
+# 3. On the remote shell, fetch the latest script from GitHub and run it
+#    under sudo. sudo will prompt for CCBCAdmin's password interactively.
+AUTHKEY=tskey-auth-xxxxxxxxxxxx
 curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh \
-  | ssh -t CCBCAdmin@<mac-ip-or-name> "sudo TAILSCALE_AUTHKEY=$AUTHKEY bash -s"
+  | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
 ```
 
-You'll be prompted for `CCBCAdmin`'s password (for SSH) and again for `sudo`.
-The script will:
+> **Why two steps?** Piping `curl ... | ssh "sudo bash -s"` from your laptop
+> works, but it ties up stdin with the script body, so `sudo` can't read your
+> password from the terminal and may fail with "sudo: a terminal is required".
+> SSH'ing first and running the pipeline on the remote shell sidesteps that
+> entirely.
 
 1. Refuse to run if the GUI Tailscale.app or its system extension is installed
    (it'll print exact removal commands).
