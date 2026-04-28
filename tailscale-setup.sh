@@ -24,7 +24,10 @@ set -euo pipefail
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
-TAILSCALE_TAGS="tag:communications"
+# Tags are inherited from the auth key, so they're configured in the Tailscale
+# admin console when the key is generated — not here. This keeps the script
+# generic across different deployment groups (e.g. tag:communications,
+# tag:office, tag:kiosk) by just swapping the auth key.
 TAILSCALE_HOSTNAME="$(scutil --get ComputerName 2>/dev/null | tr ' ' '-' | tr -cd '[:alnum:]-')"
 
 #=============================================================================
@@ -192,12 +195,12 @@ if ! launchctl list | grep -q com.tailscale.tailscaled; then
 fi
 
 #=============================================================================
-# STEP 5: Bring Tailscale up — auth key, tags, SSH, hostname
+# STEP 5: Bring Tailscale up — auth key, SSH, hostname
 #=============================================================================
+# Tags are inherited from the auth key (see CONFIGURATION above).
 echo "Authenticating and connecting Tailscale..."
 "$TAILSCALE" up \
     --authkey="${TAILSCALE_AUTHKEY}" \
-    --advertise-tags="${TAILSCALE_TAGS}" \
     --ssh \
     --hostname="${TAILSCALE_HOSTNAME}" \
     --reset
@@ -212,7 +215,7 @@ echo "Tailscale status:"
 echo
 echo "Tailscale deployment complete."
 echo "Hostname: ${TAILSCALE_HOSTNAME}"
-echo "Tags:     ${TAILSCALE_TAGS}"
+echo "Tags:     (inherited from auth key)"
 echo
 echo "To update later:  sudo -u ${CONSOLE_USER} ${BREW} upgrade tailscale"
 exit 0
