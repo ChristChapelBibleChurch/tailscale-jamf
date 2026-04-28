@@ -36,8 +36,7 @@ ssh CCBCAdmin@<mac-ip-or-name>
 # 3. On the remote shell, fetch the latest script from GitHub and run it
 #    under sudo. sudo will prompt for CCBCAdmin's password interactively.
 AUTHKEY=tskey-auth-xxxxxxxxxxxx
-curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh \
-  | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
+curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
 ```
 
 > **Why two steps?** Piping `curl ... | ssh "sudo bash -s"` from your laptop
