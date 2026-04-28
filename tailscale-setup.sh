@@ -206,7 +206,18 @@ echo "Authenticating and connecting Tailscale..."
     --reset
 
 #=============================================================================
-# STEP 6: Verify
+# STEP 6: Configure macOS resolver for MagicDNS (*.ts.net lookups)
+#=============================================================================
+# macOS doesn't honor Tailscale's MagicDNS for the *.ts.net suffix unless we
+# install a per-domain resolver pointing at the Tailscale DNS IP. Without
+# this, `ssh somehost.tailnet-name.ts.net` and similar fail to resolve.
+echo "Installing /etc/resolver/ts.net for MagicDNS..."
+mkdir -p /etc/resolver
+echo "nameserver 100.100.100.100" > /etc/resolver/ts.net
+chmod 644 /etc/resolver/ts.net
+
+#=============================================================================
+# STEP 7: Verify
 #=============================================================================
 echo
 echo "Tailscale status:"

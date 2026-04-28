@@ -88,11 +88,17 @@ chained so tailscale starts immediately after Homebrew finishes.
 1. Refuse to run if the GUI Tailscale.app or its system extension is installed
    (it'll print exact removal commands).
 2. Refuse to run if Homebrew isn't installed (install it first — see below).
-3. `brew install tailscale`.
+3. `brew install tailscale` (or `brew upgrade tailscale` if already installed).
 4. Register `tailscaled` as a root LaunchDaemon (`com.tailscale.tailscaled`).
-5. Run `tailscale up` with the auth key, `tag:communications`, `--ssh`, and the
-   Mac's `ComputerName` as the hostname.
-6. Print `tailscale status`.
+5. Run `tailscale up` with the auth key, `--ssh`, and the Mac's `ComputerName`
+   as the hostname. Tags are inherited from the auth key.
+6. Install `/etc/resolver/ts.net` so macOS resolves MagicDNS `*.ts.net`
+   hostnames through Tailscale's DNS (`100.100.100.100`).
+7. Print `tailscale status`.
+
+The script is **idempotent** \u2014 safe to re-run on a device that's already set
+up. See [Re-running on an existing install](#re-running-on-an-existing-install)
+below for what happens at each step.
 
 When it finishes, the device shows up in the Tailscale admin console already
 tagged, and you can immediately reach it via Tailscale SSH:
@@ -240,6 +246,48 @@ a successful run prints the exact command for that machine, e.g.:
 ```sh
 sudo -u CCBCAdmin /opt/homebrew/bin/brew upgrade tailscale
 ```
+
+---
+
+## Re-running on an existing install
+
+The script is **safe to run repeatedly** on a device that's already enrolled
+\u2014 it's idempotent at every step:
+
+| Step                               | On a clean Mac                                                  | On an already-set-up Mac                                                                                                                                                                    |
+| ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GUI app / system extension check   | Pass                                                            | Pass (script refuses to coexist either way)                                                                                                                                                 |
+| Homebrew check                     | Pass                                                            | Pass                                                                                                                                                                                        |
+| `brew install tailscale`           | Installs                                                        | Detects existing formula, runs `brew upgrade tailscale` instead (no-op if current)                                                                                                          |
+| `tailscaled install-system-daemon` | Creates `/Library/LaunchDaemons/com.tailscale.tailscaled.plist` | Overwrites the same plist with the current binary's path; reloads the daemon                                                                                                                |
+| `tailscale up --reset`             | Authenticates and joins the tailnet                             | Re-applies the auth key, hostname, and `--ssh` flag. **`--reset` clears any locally-set flags (e.g. `--accept-routes`, `--exit-node`) and replaces them with what's on this command line.** |
+| `/etc/resolver/ts.net`             | Created                                                         | Overwritten with the same contents (no-op)                                                                                                                                                  |
+
+**Things to know before re-running:**
+
+- **Auth key reuse.** Reusable auth keys can be used as many times as you want
+  before they expire. The device's existing tailnet identity is preserved
+  (same node key, same `100.x.x.x` address) \u2014 `tailscale up` just refreshes
+  the session.
+- **`--reset` is intentional.** It guarantees the device's runtime config matches
+  what this script declares. If you've manually configured `--accept-routes`,
+  `--exit-node`, `--accept-dns=false`, etc. on a device, **re-running the
+  script will undo those.** Re-apply them after the script finishes if needed.
+- **Hostname can change.** The hostname is recomputed from `scutil --get
+ComputerName` each run. If someone renamed the Mac in System Settings, the
+  next script run will rename the Tailscale node to match.
+- **Tags follow the auth key.** Re-running with a key that has a different tag
+  set will move the device into that new tag group (subject to your tailnet's
+  ACL `tagOwners` rules).
+- **No reboot required.** All changes take effect immediately.
+
+**When you do _not_ want to re-run the whole script:**
+
+- Just to update Tailscale: `sudo -u CCBCAdmin /opt/homebrew/bin/brew upgrade tailscale`
+- Just to refresh DNS: `sudo tailscale set --accept-dns=true` (or just
+  `tailscale up` with no flags)
+- Just to change tags: generate a new auth key with new tags and run
+  `sudo tailscale up --authkey=tskey-... --reset`
 
 ---
 
