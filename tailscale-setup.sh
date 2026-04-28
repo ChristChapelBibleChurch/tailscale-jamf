@@ -126,8 +126,13 @@ fi
 
 echo "Using Homebrew at $BREW (as user: $CONSOLE_USER)"
 
+# NOTE: stdin is redirected from /dev/null so that when this script is run
+# via `curl ... | sudo bash`, brew (and its subprocesses) can't consume
+# bytes from the script body that bash is still reading. Without this,
+# `brew install` on a fresh machine swallows part of the script and the
+# rest is printed to the terminal instead of executed.
 run_brew() {
-    sudo -u "$CONSOLE_USER" "$BREW" "$@"
+    sudo -u "$CONSOLE_USER" "$BREW" "$@" </dev/null
 }
 
 #=============================================================================

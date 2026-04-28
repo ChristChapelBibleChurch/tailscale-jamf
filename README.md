@@ -33,11 +33,36 @@ so `sudo` can prompt for the password normally:
 # 2. SSH into the target Mac
 ssh CCBCAdmin@<mac-ip-or-name>
 
-# 3. On the remote shell, fetch the latest script from GitHub and run it
-#    under sudo. sudo will prompt for CCBCAdmin's password interactively.
+# 3. On the remote shell, install Homebrew if missing, then run the
+#    tailscale setup. sudo will prompt for CCBCAdmin's password interactively.
 AUTHKEY=tskey-auth-xxxxxxxxxxxx
-curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
+
+if ! [ -x /opt/homebrew/bin/brew ] && ! [ -x /usr/local/bin/brew ]; then
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+fi
+
+curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh \
+  | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
 ```
+
+`NONINTERACTIVE=1` tells the Homebrew installer to skip its "Press RETURN to
+continue" and CLT confirmation prompts. The two commands are chained so the
+tailscale install starts immediately after Homebrew finishes.
+
+> **Heads-up: Xcode Command Line Tools.** On a fresh Mac with no CLT installed,
+> Homebrew triggers the OS to install them. With `NONINTERACTIVE=1` it skips
+> the terminal prompt, but macOS may still pop a **GUI dialog on the target
+> Mac's screen** asking to confirm. If the Mac is headless or unattended,
+> pre-install CLT silently first (one SSH command):
+>
+> ```sh
+> ssh -t CCBCAdmin@<mac-ip-or-name> '
+>   sudo touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+>   PROD=$(softwareupdate -l | grep -E "Command Line Tools" | tail -1 | awk -F"*" "{print \$2}" | sed "s/^ *//")
+>   sudo softwareupdate -i "$PROD" --verbose
+>   sudo rm /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+> '
+> ```
 
 > **Why two steps?** Piping `curl ... | ssh "sudo bash -s"` from your laptop
 > works, but it ties up stdin with the script body, so `sudo` can't read your
