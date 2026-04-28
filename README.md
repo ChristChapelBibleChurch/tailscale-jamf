@@ -35,12 +35,17 @@ ssh CCBCAdmin@<mac-ip-or-name>
 
 # 3. On the remote shell, install Homebrew if missing, then run the
 #    tailscale setup. `sudo -v` prompts for CCBCAdmin's password once and
-#    caches it so the brew installer (which uses sudo internally and won't
-#    prompt under NONINTERACTIVE=1) and the final tailscale install both
-#    reuse the cached credential \u2014 one password prompt total.
+#    a background keepalive refreshes the cache every 60s so a slow brew
+#    install on a slow connection can't outrun sudo's 5-minute timeout.
+#    Both the brew installer (which uses sudo internally and won't prompt
+#    under NONINTERACTIVE=1) and the final tailscale install reuse the
+#    cached credential \u2014 one password prompt total.
 AUTHKEY=tskey-auth-xxxxxxxxxxxx
 
 sudo -v
+( while true; do sudo -n true; sleep 60; done ) 2>/dev/null &
+SUDO_KEEPALIVE=$!
+trap 'kill "$SUDO_KEEPALIVE" 2>/dev/null' EXIT
 
 if ! [ -x /opt/homebrew/bin/brew ] && ! [ -x /usr/local/bin/brew ]; then
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -48,13 +53,16 @@ fi
 
 curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-jamf/main/tailscale-setup.sh \
   | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
+
+kill "$SUDO_KEEPALIVE" 2>/dev/null; trap - EXIT
 ```
 
-`sudo -v` caches your password for ~5 minutes (the default sudo timeout).
-`NONINTERACTIVE=1` then tells the Homebrew installer to skip its "Press RETURN
-to continue" and CLT confirmation prompts \u2014 and because sudo is already
-authenticated, brew's internal `sudo` calls don't need to prompt either. The
-two installs are chained so tailscale starts immediately after Homebrew finishes.
+`sudo -v` caches your password and the background loop (`sudo -n true` every
+60s) keeps it warm for the duration of the install \u2014 important on slow
+networks where `brew install tailscale` can take longer than sudo's 5-minute
+default timeout. `NONINTERACTIVE=1` tells the Homebrew installer to skip its
+"Press RETURN to continue" and CLT confirmation prompts. The two installs are
+chained so tailscale starts immediately after Homebrew finishes.
 
 > **Heads-up: Xcode Command Line Tools.** On a fresh Mac with no CLT installed,
 > Homebrew triggers the OS to install them. With `NONINTERACTIVE=1` it skips
