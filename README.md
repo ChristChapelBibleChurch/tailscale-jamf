@@ -131,7 +131,11 @@ One of those paths must exist — `/opt/homebrew/bin/brew` on Apple Silicon,
 ## Generating the auth key (expires every 90 days)
 
 The script needs a **pre-authorized, tagged auth key** so devices join silently
-and land in the right ACL group with no manual approval.
+and land in the right ACL group with no manual approval. **Tags are baked into
+the auth key** and the device inherits them automatically — the script itself
+is tag-agnostic, so you can use the same script with different keys to deploy
+devices into different groups (e.g. `tag:communications`, `tag:office`,
+`tag:kiosk`).
 
 1. Sign in to <https://login.tailscale.com/admin/settings/keys>.
 2. Click **Generate auth key…**
@@ -139,11 +143,13 @@ and land in the right ACL group with no manual approval.
    - **Reusable:** ✅ on (so the same key works for every Mac you set up)
    - **Ephemeral:** ❌ off (these are long-lived workstations)
    - **Pre-approved:** ✅ on (skip device approval)
-   - **Tags:** `tag:communications` (must match `TAILSCALE_TAGS` in
-     [`tailscale-setup.sh`](tailscale-setup.sh))
+   - **Tags:** pick whichever tag(s) the devices using this key should get
+     (e.g. `tag:communications`). Make sure a corresponding `tagOwners` entry
+     exists in your tailnet policy file (see below).
    - **Expiration:** 90 days (Tailscale's max for auth keys)
 4. Copy the `tskey-auth-…` value **immediately** — it's only shown once.
-5. Store it in your password manager labeled with the **expiration date**.
+5. Store it in your password manager labeled with the **expiration date** and
+   which tag(s) it grants.
 
 ### When the key expires (every 90 days)
 
@@ -156,10 +162,10 @@ Auth keys can't be renewed — you generate a new one and rotate:
    - **Server-side `/etc/tailscale-deploy.conf`** — `sudo vi` and replace the value.
 3. Revoke the old key on the same admin page so a leaked copy can't be used.
 
-> **Tag prerequisites:** before the key works, an ACL **tag owner** must exist
-> for `tag:communications` in your tailnet policy file
-> (`"tagOwners": { "tag:communications": ["group:admins"] }`). Without that, the
-> auth key generation will fail.
+> **Tag prerequisites:** before a tagged key works, an ACL **tag owner** must
+> exist for that tag in your tailnet policy file, e.g.
+> `"tagOwners": { "tag:communications": ["group:admins"] }`. Without that,
+> auth-key generation will fail.
 
 ---
 
@@ -255,8 +261,8 @@ Your key is missing, expired, or doesn't start with `tskey-`. Generate a new
 one (see above).
 
 **`tailscale up` fails with `requested tags … are not permitted`**
-The auth key wasn't generated with `tag:communications`, or your tailnet policy
-file has no `tagOwners` entry for it.
+The auth key wasn't generated with a tag, or your tailnet policy file has no
+`tagOwners` entry for the tag baked into the key.
 
 ---
 
