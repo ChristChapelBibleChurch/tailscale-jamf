@@ -34,8 +34,13 @@ so `sudo` can prompt for the password normally:
 ssh CCBCAdmin@<mac-ip-or-name>
 
 # 3. On the remote shell, install Homebrew if missing, then run the
-#    tailscale setup. sudo will prompt for CCBCAdmin's password interactively.
+#    tailscale setup. `sudo -v` prompts for CCBCAdmin's password once and
+#    caches it so the brew installer (which uses sudo internally and won't
+#    prompt under NONINTERACTIVE=1) and the final tailscale install both
+#    reuse the cached credential \u2014 one password prompt total.
 AUTHKEY=tskey-auth-xxxxxxxxxxxx
+
+sudo -v
 
 if ! [ -x /opt/homebrew/bin/brew ] && ! [ -x /usr/local/bin/brew ]; then
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -45,9 +50,11 @@ curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-j
   | sudo TAILSCALE_AUTHKEY="$AUTHKEY" bash
 ```
 
-`NONINTERACTIVE=1` tells the Homebrew installer to skip its "Press RETURN to
-continue" and CLT confirmation prompts. The two commands are chained so the
-tailscale install starts immediately after Homebrew finishes.
+`sudo -v` caches your password for ~5 minutes (the default sudo timeout).
+`NONINTERACTIVE=1` then tells the Homebrew installer to skip its "Press RETURN
+to continue" and CLT confirmation prompts \u2014 and because sudo is already
+authenticated, brew's internal `sudo` calls don't need to prompt either. The
+two installs are chained so tailscale starts immediately after Homebrew finishes.
 
 > **Heads-up: Xcode Command Line Tools.** On a fresh Mac with no CLT installed,
 > Homebrew triggers the OS to install them. With `NONINTERACTIVE=1` it skips
