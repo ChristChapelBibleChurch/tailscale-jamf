@@ -77,53 +77,53 @@ echo "Will install Homebrew (if needed) as: $ADMIN_USER (home: $ADMIN_HOME)"
 #=============================================================================
 # Install Homebrew if missing (as the admin user, never as root)
 #=============================================================================
-BREW=""
-for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    if [[ -x "$candidate" ]]; then
-        BREW="$candidate"
-        break
-    fi
-done
+# BREW=""
+# for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+#     if [[ -x "$candidate" ]]; then
+#         BREW="$candidate"
+#         break
+#     fi
+# done
 
-if [[ -z "$BREW" ]]; then
-    echo "Homebrew not found \u2014 installing as $ADMIN_USER..."
+# if [[ -z "$BREW" ]]; then
+#     echo "Homebrew not found \u2014 installing as $ADMIN_USER..."
 
-    # NONINTERACTIVE=1: skip "Press RETURN" prompt + auto-accept CLT install.
-    # HOME must be set to the admin user's home or brew complains.
-    /usr/bin/sudo -u "$ADMIN_USER" -H \
-        /usr/bin/env \
-            HOME="$ADMIN_HOME" \
-            NONINTERACTIVE=1 \
-            CI=1 \
-        /bin/bash -c \
-        "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+#     # NONINTERACTIVE=1: skip "Press RETURN" prompt + auto-accept CLT install.
+#     # HOME must be set to the admin user's home or brew complains.
+#     /usr/bin/sudo -u "$ADMIN_USER" -H \
+#         /usr/bin/env \
+#             HOME="$ADMIN_HOME" \
+#             NONINTERACTIVE=1 \
+#             CI=1 \
+#         /bin/bash -c \
+#         "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-    for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-        if [[ -x "$candidate" ]]; then
-            BREW="$candidate"
-            break
-        fi
-    done
+#     for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+#         if [[ -x "$candidate" ]]; then
+#             BREW="$candidate"
+#             break
+#         fi
+#     done
 
-    if [[ -z "$BREW" ]]; then
-        echo "ERROR: Homebrew install completed but brew binary still not found." >&2
-        exit 1
-    fi
-fi
+#     if [[ -z "$BREW" ]]; then
+#         echo "ERROR: Homebrew install completed but brew binary still not found." >&2
+#         exit 1
+#     fi
+# fi
 
-echo "Homebrew available at: $BREW"
+# echo "Homebrew available at: $BREW"
 
-#=============================================================================
-# Fetch and run the main tailscale-setup.sh
-#=============================================================================
-echo "Fetching tailscale-setup.sh from: $SCRIPT_URL"
+# #=============================================================================
+# # Fetch and run the main tailscale-setup.sh
+# #=============================================================================
+# echo "Fetching tailscale-setup.sh from: $SCRIPT_URL"
 
-# Pipe the script body in via stdin, but redirect the wrapped script's stdin
-# from /dev/null so its internal brew calls can't accidentally consume the
-# script body (same reason tailscale-setup.sh redirects stdin in run_brew).
-/usr/bin/curl -fsSL "$SCRIPT_URL" \
-    | TAILSCALE_AUTHKEY="$AUTHKEY" /bin/bash -s </dev/null
+# # Pipe the script body in via stdin, but redirect the wrapped script's stdin
+# # from /dev/null so its internal brew calls can't accidentally consume the
+# # script body (same reason tailscale-setup.sh redirects stdin in run_brew).
+# /usr/bin/curl -fsSL "$SCRIPT_URL" \
+#     | TAILSCALE_AUTHKEY="$AUTHKEY" /bin/bash -s </dev/null
 
-echo
-echo "Jamf one-shot deploy complete."
-exit 0
+# echo
+# echo "Jamf one-shot deploy complete."
+# exit 0
