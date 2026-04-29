@@ -35,47 +35,19 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 #=============================================================================
-# Determine the non-root admin user that should own Homebrew
+# Helper: detect a real, local admin account (UID >= 501)
 #=============================================================================
-if [[ -n "$ADMIN_USER_OVERRIDE" ]]; then
-    ADMIN_USER="$ADMIN_USER_OVERRIDE"
-else
-    ADMIN_USER="$(/usr/bin/stat -f%Su /dev/console 2>/dev/null || true)"
-fi
-
-if [[ -z "$ADMIN_USER" || "$ADMIN_USER" == "root" || "$ADMIN_USER" == "loginwindow" ]]; then
-    # No one logged in. Fall back to the first local admin account that isn't
-    # a system/service user.
-    ADMIN_USER="$(
-        /usr/bin/dscl . -list /Users UniqueID 2>/dev/null \
-            | awk '$2 >= 501 { print $1 }' \
-            | while read -r u; do
-                if /usr/sbin/dseditgroup -o checkmember -m "$u" admin >/dev/null 2>&1; then
-                    echo "$u"; break
-                fi
-            done
-    )"
-fi
-
-if [[ -z "$ADMIN_USER" || "$ADMIN_USER" == "root" ]]; then
-    echo "ERROR: Could not find a non-root admin user to own Homebrew." >&2
-    echo "       Pass an explicit user as Jamf parameter \$5." >&2
-    exit 1
-fi
-
-# Verify the user actually exists and is a real account.
-if ! /usr/bin/id -u "$ADMIN_USER" >/dev/null 2>&1; then
-    echo "ERROR: User '$ADMIN_USER' does not exist on this Mac." >&2
-    exit 1
-fi
-
-ADMIN_HOME="$(/usr/bin/dscl . -read "/Users/$ADMIN_USER" NFSHomeDirectory 2>/dev/null \
-    | awk '{print $2}')"
-
-echo "Will install Homebrew (if needed) as: $ADMIN_USER (home: $ADMIN_HOME)"
+is_local_admin() {
+    local u="$1"
+    [[ -z "$u" || "$u" == "root" || "$u" == "loginwindow" ]] && return 1
+    local uid
+    uid="$(/usr/bin/id -u "$u" 2>/dev/null)" || return 1
+    [[ "$uid" -ge 501 ]] || return 1
+    /usr/sbin/dseditgroup -o checkmember -m "$u" admin >/dev/null 2>&1
+}
 
 #=============================================================================
-# Install Homebrew if missing (as the admin user, never as root)
+# Locate Homebrew
 #=============================================================================
 BREW=""
 for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
@@ -85,8 +57,94 @@ for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
     fi
 done
 
-if [[ -z "$BREW" ]]; then
-    echo "Homebrew not found \u2014 installing as $ADMIN_USER..."
+#=============================================================================
+# Install Homebrew if (and only if) it is not already installed
+#=============================================================================
+if [[ -n "$BREW" ]]; then
+    echo "Homebrew already installed at $BREW \u2014 skipping install."
+else
+    echo "Homebrew not found \u2014 will install."
+
+    #=========================================================================
+    # Determine the non-root admin user that should own Homebrew.
+    # This lookup only runs when we actually need to install brew.
+    #
+    # Priority order (first match wins):
+    #   1. Jamf parameter $5             explicit override (e.g. "ccbcadmin")
+    #   2. /etc/tailscale-deploy.conf    BREW_OWNER=...
+    #   3. The console user, only if they're a real local admin
+    #   4. A known service-account name from PREFERRED_ADMINS (handles fleets
+    #      provisioned with mixed admin account names like jamfadmin/ccbcadmin)
+    #   5. The lowest-UID local admin account on the Mac (last resort)
+    #
+    # DO NOT fall back to a non-admin console user \u2014 brew install will fail
+    # and the formula will end up owned by an account that can't manage it.
+    #=========================================================================
+    ADMIN_USER=""
+
+    # 1. Explicit Jamf override
+    if [[ -n "$ADMIN_USER_OVERRIDE" ]]; then
+        if is_local_admin "$ADMIN_USER_OVERRIDE"; then
+            ADMIN_USER="$ADMIN_USER_OVERRIDE"
+        else
+            echo "ERROR: Jamf \$5 override '$ADMIN_USER_OVERRIDE' is not a local admin on this Mac." >&2
+            exit 1
+        fi
+    fi
+
+    # 2. Optional config file
+    if [[ -z "$ADMIN_USER" && -r /etc/tailscale-deploy.conf ]]; then
+        CONF_BREW_OWNER="$(/usr/bin/awk -F= '/^BREW_OWNER=/ { gsub(/"/,"",$2); print $2 }' /etc/tailscale-deploy.conf | tail -1)"
+        if [[ -n "$CONF_BREW_OWNER" ]] && is_local_admin "$CONF_BREW_OWNER"; then
+            ADMIN_USER="$CONF_BREW_OWNER"
+        fi
+    fi
+
+    # 3. Console user, only if they happen to be an admin
+    if [[ -z "$ADMIN_USER" ]]; then
+        CONSOLE_USER="$(/usr/bin/stat -f%Su /dev/console 2>/dev/null || true)"
+        if is_local_admin "$CONSOLE_USER"; then
+            ADMIN_USER="$CONSOLE_USER"
+        fi
+    fi
+
+    # 4. Known service-account names
+    PREFERRED_ADMINS=(ccbcadmin jamfadmin)
+    if [[ -z "$ADMIN_USER" ]]; then
+        for candidate in "${PREFERRED_ADMINS[@]}"; do
+            if is_local_admin "$candidate"; then
+                ADMIN_USER="$candidate"
+                break
+            fi
+        done
+    fi
+
+    # 5. Lowest-UID local admin
+    if [[ -z "$ADMIN_USER" ]]; then
+        ADMIN_USER="$(
+            /usr/bin/dscl . -list /Users UniqueID 2>/dev/null \
+                | awk '$2 >= 501 { print $2, $1 }' \
+                | sort -n \
+                | awk '{print $2}' \
+                | while read -r u; do
+                    if /usr/sbin/dseditgroup -o checkmember -m "$u" admin >/dev/null 2>&1; then
+                        echo "$u"; break
+                    fi
+                done
+        )"
+    fi
+
+    if [[ -z "$ADMIN_USER" ]] || ! is_local_admin "$ADMIN_USER"; then
+        echo "ERROR: Could not find a local admin user on this Mac to own Homebrew." >&2
+        echo "       Pass one as Jamf parameter \$5 (e.g. 'ccbcadmin')," >&2
+        echo "       or add 'BREW_OWNER=ccbcadmin' to /etc/tailscale-deploy.conf." >&2
+        exit 1
+    fi
+
+    ADMIN_HOME="$(/usr/bin/dscl . -read "/Users/$ADMIN_USER" NFSHomeDirectory 2>/dev/null \
+        | awk '{print $2}')"
+
+    echo "Installing Homebrew as: $ADMIN_USER (home: $ADMIN_HOME)"
 
     # NONINTERACTIVE=1: skip "Press RETURN" prompt + auto-accept CLT install.
     # HOME must be set to the admin user's home or brew complains.
