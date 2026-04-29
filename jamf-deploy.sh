@@ -77,53 +77,75 @@ echo "Will install Homebrew (if needed) as: $ADMIN_USER (home: $ADMIN_HOME)"
 #=============================================================================
 # Install Homebrew if missing (as the admin user, never as root)
 #=============================================================================
-# BREW=""
-# for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-#     if [[ -x "$candidate" ]]; then
-#         BREW="$candidate"
-#         break
-#     fi
-# done
+BREW=""
+for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [[ -x "$candidate" ]]; then
+        BREW="$candidate"
+        break
+    fi
+done
 
-# if [[ -z "$BREW" ]]; then
-#     echo "Homebrew not found \u2014 installing as $ADMIN_USER..."
+if [[ -z "$BREW" ]]; then
+    echo "Homebrew not found \u2014 installing as $ADMIN_USER..."
 
-#     # NONINTERACTIVE=1: skip "Press RETURN" prompt + auto-accept CLT install.
-#     # HOME must be set to the admin user's home or brew complains.
-#     /usr/bin/sudo -u "$ADMIN_USER" -H \
-#         /usr/bin/env \
-#             HOME="$ADMIN_HOME" \
-#             NONINTERACTIVE=1 \
-#             CI=1 \
-#         /bin/bash -c \
-#         "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # NONINTERACTIVE=1: skip "Press RETURN" prompt + auto-accept CLT install.
+    # HOME must be set to the admin user's home or brew complains.
+    /usr/bin/sudo -u "$ADMIN_USER" -H \
+        /usr/bin/env \
+            HOME="$ADMIN_HOME" \
+            NONINTERACTIVE=1 \
+            CI=1 \
+        /bin/bash -c \
+        "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-#     for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-#         if [[ -x "$candidate" ]]; then
-#             BREW="$candidate"
-#             break
-#         fi
-#     done
+    for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        if [[ -x "$candidate" ]]; then
+            BREW="$candidate"
+            break
+        fi
+    done
 
-#     if [[ -z "$BREW" ]]; then
-#         echo "ERROR: Homebrew install completed but brew binary still not found." >&2
-#         exit 1
-#     fi
-# fi
+    if [[ -z "$BREW" ]]; then
+        echo "ERROR: Homebrew install completed but brew binary still not found." >&2
+        exit 1
+    fi
+fi
 
-# echo "Homebrew available at: $BREW"
+echo "Homebrew available at: $BREW"
 
-# #=============================================================================
-# # Fetch and run the main tailscale-setup.sh
-# #=============================================================================
-# echo "Fetching tailscale-setup.sh from: $SCRIPT_URL"
+#=============================================================================
+# Fetch and run the main tailscale-setup.sh
+#=============================================================================
+echo "Fetching tailscale-setup.sh from: $SCRIPT_URL"
 
-# # Pipe the script body in via stdin, but redirect the wrapped script's stdin
-# # from /dev/null so its internal brew calls can't accidentally consume the
-# # script body (same reason tailscale-setup.sh redirects stdin in run_brew).
-# /usr/bin/curl -fsSL "$SCRIPT_URL" \
-#     | TAILSCALE_AUTHKEY="$AUTHKEY" /bin/bash -s </dev/null
+# Download to a temp file first (instead of piping curl|bash) so that:
+#   1. We get curl's real exit code separately from bash's.
+#   2. If the inner script exits non-zero, Jamf's log shows the actual error,
+#      not curl's misleading "exit 23 / write error" from a closed pipe.
+TMP_SCRIPT="$(/usr/bin/mktemp /tmp/tailscale-setup.XXXXXX.sh)"
+trap 'rm -f "$TMP_SCRIPT"' EXIT
 
-# echo
-# echo "Jamf one-shot deploy complete."
-# exit 0
+if ! /usr/bin/curl -fsSL "$SCRIPT_URL" -o "$TMP_SCRIPT"; then
+    echo "ERROR: Failed to download $SCRIPT_URL" >&2
+    exit 1
+fi
+
+if [[ ! -s "$TMP_SCRIPT" ]]; then
+    echo "ERROR: Downloaded script is empty." >&2
+    exit 1
+fi
+
+echo "Running tailscale-setup.sh..."
+set +e
+TAILSCALE_AUTHKEY="$AUTHKEY" /bin/bash "$TMP_SCRIPT"
+SETUP_EXIT=$?
+set -e
+
+if [[ $SETUP_EXIT -ne 0 ]]; then
+    echo "ERROR: tailscale-setup.sh exited with code $SETUP_EXIT" >&2
+    exit $SETUP_EXIT
+fi
+
+echo
+echo "Jamf one-shot deploy complete."
+exit 0
