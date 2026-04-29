@@ -231,10 +231,44 @@ curl -fsSL https://raw.githubusercontent.com/ChristChapelBibleChurch/tailscale-j
 
 ### Jamf
 
-Add `tailscale-setup.sh` as a script in Jamf and pass the auth key as
-**parameter 4**. Homebrew must already be installed on the target device \u2014
-deploy it via a separate Jamf policy first (e.g. an "Install Homebrew" script
-that runs as the GUI console user before this one).
+Use the wrapper script [`jamf-deploy.sh`](jamf-deploy.sh) as your Jamf script
+payload. It's designed to run as **root** (which Jamf does by default), needs
+no TTY, prompts for nothing, and handles the full chain on its own:
+
+1. Detects the GUI console user (or falls back to the first local admin
+   account) to use as the Homebrew owner. Override with parameter `$5` if
+   needed (e.g. for headless devices with no logged-in user).
+2. Installs Homebrew **as that user** (never as root) if missing, with
+   `NONINTERACTIVE=1` so the installer can't prompt.
+3. Curls the latest [`tailscale-setup.sh`](tailscale-setup.sh) from this repo
+   and runs it with the auth key from parameter `$4`.
+
+**Jamf script parameters:**
+
+| Param | Required | Description                                                                                |
+| ----- | -------- | ------------------------------------------------------------------------------------------ |
+| `$4`  | yes      | Tailscale auth key (`tskey-auth-...`)                                                      |
+| `$5`  | no       | Override the admin user that owns Homebrew (default: console user, then first local admin) |
+| `$6`  | no       | Override the URL to fetch `tailscale-setup.sh` from (default: this repo's `main` branch)   |
+
+**To deploy:**
+
+1. **Settings \u2192 Computer Management \u2192 Scripts \u2192 New**
+2. Paste the contents of [`jamf-deploy.sh`](jamf-deploy.sh) into the **Script**
+   tab.
+3. Under the **Options** tab, label parameter 4 "Tailscale Auth Key", parameter
+   5 "Admin User Override (optional)", parameter 6 "Script URL Override (optional)".
+4. Create a policy that runs the script and fill in the auth key in parameter 4.
+5. Schedule it however you like (Recurring Check-in, Self Service, etc.). The
+   underlying `tailscale-setup.sh` is idempotent (see
+   [Re-running on an existing install](#re-running-on-an-existing-install))
+   so it's safe at any cadence.
+
+**For a true zero-network-dependency deploy** (no GitHub fetch at runtime),
+paste both `jamf-deploy.sh` and `tailscale-setup.sh` into a single Jamf script
+payload by copying `tailscale-setup.sh`'s body in place of the curl call \u2014
+or just upload `tailscale-setup.sh` as a Jamf-managed file and skip the
+wrapper, calling it directly with parameter `$4`.
 
 ---
 
