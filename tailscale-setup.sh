@@ -139,11 +139,39 @@ run_brew() {
 }
 
 #=============================================================================
+# STEP 2.5: Fast-path — if already deployed and healthy, exit cleanly
+#=============================================================================
+# Re-running this script on an already-deployed Mac should be a no-op, not a
+# disruptive re-auth. We only continue past here if something is actually
+# wrong (formula missing, daemon not loaded, or backend not logged in).
+if run_brew list --formula tailscale >/dev/null 2>&1 \
+        && launchctl list | grep -q com.tailscale.tailscaled; then
+    EXISTING_TAILSCALE="$(command -v tailscale || true)"
+    [[ -z "$EXISTING_TAILSCALE" ]] \
+        && EXISTING_TAILSCALE="$(run_brew --prefix tailscale)/bin/tailscale"
+
+    if [[ -x "$EXISTING_TAILSCALE" ]] \
+            && "$EXISTING_TAILSCALE" status >/dev/null 2>&1; then
+        echo "Tailscale is already installed, running, and logged in. Nothing to do."
+        echo
+        "$EXISTING_TAILSCALE" status || true
+        exit 0
+    fi
+fi
+
+#=============================================================================
 # STEP 3: Install / upgrade tailscale via Homebrew
 #=============================================================================
 echo "Installing tailscale formula..."
+UPGRADED=0
 if run_brew list --formula tailscale >/dev/null 2>&1; then
+    OLD_VERSION="$(run_brew list --versions tailscale | awk '{print $2}')"
     run_brew upgrade tailscale || true
+    NEW_VERSION="$(run_brew list --versions tailscale | awk '{print $2}')"
+    if [[ "$OLD_VERSION" != "$NEW_VERSION" ]]; then
+        UPGRADED=1
+        echo "tailscale upgraded: $OLD_VERSION -> $NEW_VERSION"
+    fi
 else
     run_brew install tailscale
 fi
@@ -184,6 +212,15 @@ echo "Using tailscaled: $TAILSCALED"
 #=============================================================================
 echo "Installing tailscaled LaunchDaemon..."
 "$TAILSCALED" install-system-daemon
+
+# If we just upgraded brew's tailscale, the running tailscaled is still the
+# OLD binary (whose path on disk may already be gone). The plist now points
+# to the new binary, but launchd won't reload it on its own — kick it.
+if [[ "$UPGRADED" -eq 1 ]] \
+        && launchctl list | grep -q com.tailscale.tailscaled; then
+    echo "Restarting tailscaled to pick up upgraded binary..."
+    launchctl kickstart -k system/com.tailscale.tailscaled || true
+fi
 
 # Give launchd a moment to spin it up
 sleep 3
